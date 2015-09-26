@@ -20,7 +20,7 @@
   },
 
   Vast = function (player, settings) {
-
+    
     // return vast plugin
     return {
       createSourceObjects: function (media_files) {
@@ -94,6 +94,9 @@
                     player.vastTracker = new vast.tracker(ad, creative);
 
                     foundCreative = true;
+                    if (creative.skipDelay) {
+			settings.skip = creative.skipDelay
+		    }
                   }
 
                 } else if (creative.type === "companion" && !foundCompanion) {
@@ -124,7 +127,7 @@
       },
 
       setupEvents: function() {
-
+        var isPlayed = false;         
         var errorOccurred = false,
             canplayFn = function() {
               player.vastTracker.load();
@@ -133,31 +136,54 @@
               if (isNaN(player.vastTracker.assetDuration)) {
                 player.vastTracker.assetDuration = player.duration();
               }
+              var state = player.muted() ? 'vast-js-muted': 'vast-js-unmuted'
+              if(player.el().className.split(" ").indexOf(state) == -1){
+                    player.removeClass(state ? 'vast-js-unmuted' : 'vast-js-muted')
+		    player.vastTracker.setMuted(player.muted())
+                    player.addClass(state)	
+              }
+              if(player.loop() && player.currentTime() > 0) {
+                   isPlayed = true;
+              }
+              if(isPlayed && player.currentTime() == 0) {
+                  player.trigger("ended");
+                  return;
+              } 
               player.vastTracker.setProgress(player.currentTime());
             },
             pauseFn = function() {
+              if(player.duration() == player.currentTime()) {
+                    return;
+	      }            
               player.vastTracker.setPaused(true);
               player.one('play', function(){
                 player.vastTracker.setPaused(false);
               });
             },
+            fullscreenFn = function() {
+                var state = false;
+                if(player.el().className.split(" ").indexOf("vjs-fullscreen") != -1) {
+                     state = true;
+                }
+                player.vastTracker.setFullscreen(state);
+            }, 
             errorFn = function() {
               // Inform ad server we couldn't play the media file for this ad
               vast.util.track(player.vastTracker.ad.errorURLTemplates, {ERRORCODE: 405});
               errorOccurred = true;
               player.trigger('ended');
             };
-
         player.on('canplay', canplayFn);
         player.on('timeupdate', timeupdateFn);
         player.on('pause', pauseFn);
         player.on('error', errorFn);
-
+        player.on("fullscreenchange", fullscreenFn);
         player.one('vast-preroll-removed', function() {
           player.off('canplay', canplayFn);
           player.off('timeupdate', timeupdateFn);
           player.off('pause', pauseFn);
           player.off('error', errorFn);
+          player.off("fullscreenchange", fullscreenFn);
           if (!errorOccurred) {
             player.vastTracker.complete();
           }
@@ -168,7 +194,8 @@
         player.ads.startLinearAdMode();
         player.vast.showControls = player.controls();
         if (player.vast.showControls) {
-          player.controls(false);
+          // show controls so user can enter full screen, rewind after seek time, pause, mute, unmute events
+          //player.controls(false);
         }
 
         // load linear ad sources and start playing them
@@ -183,6 +210,7 @@
               CONTENTPLAYHEAD: player.vastTracker.progressFormated()
             }
           )[0];
+ 
         }
         var blocker = window.document.createElement("a");
         blocker.className = "vast-blocker";
@@ -225,6 +253,12 @@
         };
 
         player.vast.setupEvents();
+        var muted = player.muted()
+        if(muted) {
+           player.muted(false); // we dont want to muted ad shows
+        }
+
+        player.addClass("vast-js-unmuted")
 
         player.one('ended', player.vast.tearDown);
 
@@ -239,7 +273,6 @@
         // remove vast-specific events
         player.off('timeupdate', player.vast.timeupdate);
         player.off('ended', player.vast.tearDown);
-
         // end ad mode
         player.ads.endLinearAdMode();
 
@@ -255,11 +288,15 @@
         player.loadingSpinner.el().style.display = "none";
         var timeLeft = Math.ceil(settings.skip - player.currentTime());
         if(timeLeft > 0) {
-          player.vast.skipButton.innerHTML = "Skip in " + timeLeft + "...";
+          var text = settings.skipInText.replace(/{seconds}/, timeLeft)
+          player.vast.skipButton.innerHTML = text;
         } else {
           if((' ' + player.vast.skipButton.className + ' ').indexOf(' enabled ') === -1){
             player.vast.skipButton.className += " enabled";
-            player.vast.skipButton.innerHTML = "Skip";
+            player.vast.skipButton.innerHTML = settings.skipText;
+            player.controls(true); // skip time passed show the controls so use can trigger pause, resume events
+	    // we cant enable to 
+	    player.addClass("give-control-to-user") 	
           }
         }
       }
